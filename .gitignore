@@ -1,0 +1,37 @@
+# Node
+node_modules/
+npm-debug.log*
+package-lock.json.bak
+
+# Env et secrets locaux
+.env
+.env.local
+*.pem
+*.key
+
+# Build
+dist/
+build/
+*.tar.gz
+
+# OS et IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log
+
+# Sorties de scans (générées par la CI)
+trivy-results.*
+gitleaks-report.*
+zap-report.*
+sbom-*.json
+sbom-*.xml
+
+# SQLite local
+*.sqlite
+*.sqlite3
+*.db

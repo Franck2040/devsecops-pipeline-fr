@@ -1,0 +1,16 @@
+# Configuration markdownlint pour le projet.
+# Recyclée depuis SOC-FR-ONE, exceptions justifiées inline.
+config:
+  MD013: false               # Longueur de ligne : on autorise (tableaux, URLs).
+  MD024:
+    siblings_only: true      # Headings dupliqués OK si sections différentes.
+  MD033: false               # HTML inline OK (badges, embeds).
+  MD036: false               # Emphasis as heading OK pour notes inline.
+  MD041: false               # First line heading pas obligatoire (badges en tête).
+  MD060: false               # Pipes alignés non requis (lisibilité diff).
+
+globs:
+  - "**/*.md"
+ignores:
+  - "node_modules/**"
+  - ".github/actions/**/README.md"
