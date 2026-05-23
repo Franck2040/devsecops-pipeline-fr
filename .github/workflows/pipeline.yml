@@ -1,7 +1,7 @@
 name: DevSecOps Pipeline
 
 # Workflow d'orchestration des 7 couches de scan.
-# Les couches sont ajoutees au fil des phases du projet.
+# Les couches sont ajoutées au fil des phases du projet.
 
 on:
   push:
@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  security-events: write # Requis pour téléverser les rapports SARIF vers l'onglet Security
 
 jobs:
 
@@ -30,9 +31,33 @@ jobs:
           config-path: '.gitleaks.toml'
           fail-on-finding: 'true'
 
-  # TODO ajout au fil des phases :
-  #   layer2-sast        (Semgrep + CodeQL)
-  #   layer3-sca         (Trivy fs + npm audit)
+  layer2-sast:
+    name: "Layer 2 - SAST (Semgrep)"
+    runs-on: ubuntu-latest
+    needs: layer1-secrets # On chaîne pour exécuter les couches proprement
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan SAST Semgrep
+        uses: ./.github/actions/sast
+        with:
+          fail-on-finding: 'false' # Permet de continuer la démo tout en alertant
+
+  layer3-sca:
+    name: "Layer 3 - SCA (Trivy FS)"
+    runs-on: ubuntu-latest
+    needs: layer2-sast
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan SCA Dépendances
+        uses: ./.github/actions/sca
+        with:
+          fail-on-finding: 'false' # Ne bloque pas pour pouvoir inspecter tous les rapports
+
+  # TODO ajout au fil des phases suivantes :
   #   layer4-iac         (Checkov)
   #   layer5-container   (Trivy image, sur build)
   #   layer6-sbom        (Syft CycloneDX, sur release)

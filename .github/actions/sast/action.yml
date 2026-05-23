@@ -1,0 +1,81 @@
+name: 'DevSecOps - Scan SAST (Semgrep)'
+description: 'Analyse statique de sécurité du code source (SAST) via Semgrep. Wrapper standardisé.'
+author: 'Calixte Franck Kenmeugne'
+
+inputs:
+  upload-artifact:
+    description: "Upload des rapports (JSON et SARIF) en tant qu'artifacts (true/false)"
+    required: false
+    default: 'true'
+  fail-on-finding:
+    description: "Faire échouer le job si des failles de sécurité sont trouvées (true/false)"
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Semgrep
+      shell: bash
+      run: |
+        echo "Installing Semgrep via pip..."
+        python3 -m pip install --quiet semgrep
+        semgrep --version
+
+    - name: Run Semgrep Scan
+      shell: bash
+      id: scan
+      run: |
+        set +e
+        echo "Running Semgrep security analysis..."
+        
+        # Scan avec les règles communautaires de sécurité par défaut
+        semgrep scan \
+          --config="p/security-audit" \
+          --config="p/javascript" \
+          --json \
+          --output=semgrep-report.json
+          
+        # Génération du format SARIF pour l'onglet Security de GitHub
+        semgrep scan \
+          --config="p/security-audit" \
+          --config="p/javascript" \
+          --sarif \
+          --output=semgrep-report.sarif
+          
+        EXIT_CODE=$?
+        echo "exit_code=${EXIT_CODE}" >> "$GITHUB_OUTPUT"
+        
+        # Analyse sommaire du JSON pour compter les vulnérabilités trouvées
+        if [ -f semgrep-report.json ]; then
+          FINDINGS_COUNT=$(jq '.results | length' semgrep-report.json 2>/dev/null || echo "0")
+          echo "::notice::Semgrep a détecté ${FINDINGS_COUNT} vulnérabilités potentielles."
+          
+          if [ "$FINDINGS_COUNT" -gt 0 ]; then
+            echo "::warning::Des vulnérabilités statiques ont été découvertes dans le code source."
+            if [ "${{ inputs.fail-on-finding }}" = "true" ]; then
+              exit 1
+            fi
+          fi
+        else
+          echo "::error::Le rapport Semgrep n'a pas pu être généré."
+          exit 1
+        fi
+        
+        set -e
+
+    - name: Upload SAST Artifacts
+      if: always() && inputs.upload-artifact == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: semgrep-sast-reports
+        path: |
+          semgrep-report.json
+          semgrep-report.sarif
+        retention-days: 30
+        if-no-files-found: warn

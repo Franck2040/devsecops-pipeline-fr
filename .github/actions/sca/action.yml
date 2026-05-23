@@ -1,0 +1,84 @@
+name: 'DevSecOps - Scan SCA (Trivy FS & npm audit)'
+description: 'Analyse de la sécurité des dépendances logicielles (SCA) via Trivy et npm audit.'
+author: 'Calixte Franck Kenmeugne'
+
+inputs:
+  trivy-version:
+    description: "Version de Trivy à installer"
+    required: false
+    default: '0.51.1'
+  upload-artifact:
+    description: "Upload des rapports d'audit (true/false)"
+    required: false
+    default: 'true'
+  fail-on-finding:
+    description: "Faire échouer le job si des vulnérabilités critiques sont trouvées (true/false)"
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Trivy
+      shell: bash
+      run: |
+        VERSION="${{ inputs.trivy-version }}"
+        echo "Installing Trivy v${VERSION}..."
+        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /tmp v${VERSION}
+        sudo install -m 0755 /tmp/trivy /usr/local/bin/trivy
+        trivy --version
+
+    - name: Run Trivy FS SCA
+      shell: bash
+      run: |
+        set +e
+        echo "Running Trivy filesystem analysis on packages..."
+        
+        # Scan des dépendances (SCA) avec génération d'un rapport JSON
+        trivy fs \
+          --scanners vuln \
+          --format json \
+          --output trivy-sca-report.json \
+          .
+          
+        # Rendu console lisible pour les logs GitHub
+        trivy fs \
+          --scanners vuln \
+          --severity HIGH,CRITICAL \
+          .
+          
+        EXIT_CODE_TRIVY=$?
+        
+        if [ "$EXIT_CODE_TRIVY" -ne 0 ] && [ "${{ inputs.fail-on-finding }}" = "true" ]; then
+          echo "::error::Trivy a détecté des failles de dépendances bloquantes."
+          exit 1
+        fi
+        set -e
+
+    - name: Run Node npm audit
+      shell: bash
+      run: |
+        set +e
+        echo "Running npm audit..."
+        cd app
+        npm audit --json > ../npm-audit-report.json
+        
+        # Rendu console standard pour visibilité humaine dans les logs
+        npm audit
+        
+        EXIT_CODE_NPM=$?
+        if [ "$EXIT_CODE_NPM" -ne 0 ]; then
+          echo "::warning::npm audit a identifié des dépendances vulnérables."
+        fi
+        set -e
+
+    - name: Upload SCA Artifacts
+      if: always() && inputs.upload-artifact == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: sca-reports
+        path: |
+          trivy-sca-report.json
+          npm-audit-report.json
+        retention-days: 30
+        if-no-files-found: warn
