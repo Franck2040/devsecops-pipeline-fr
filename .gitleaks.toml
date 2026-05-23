@@ -1,0 +1,37 @@
+# Configuration Gitleaks pour devsecops-pipeline-fr
+#
+# Cette config etend les regles par defaut de Gitleaks et ajoute une
+# allowlist EXPLICITE pour les secrets volontaires de l'app de demo.
+#
+# Tout autre secret detecte fait echouer la CI.
+
+title = "DevSecOps Pipeline FR - Gitleaks Config"
+
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# Allowlist : exemptions documentees
+# ---------------------------------------------------------------------------
+# Chaque entree pointe vers une vulnerabilite cataloguee dans
+# docs/vulnerabilities.md. Aucune entree n'est ajoutee sans cross-reference.
+
+[allowlist]
+description = "Exemptions pour vulnerabilites volontaires de l'app de demo"
+
+# VULN-006 : JWT_SECRET en dur dans app/server.js
+# VULN-007 : faux token AWS dans app/server.js
+# Voir docs/vulnerabilities.md pour le detail pedagogique
+regexes = [
+    '''supersecret_dev_jwt_key_change_me_42''',
+    '''AKIAIOSFODNN7EXAMPLE''',
+]
+
+# Fichiers qui mentionnent les patterns sans etre du vrai code applicatif
+paths = [
+    '''docs/vulnerabilities\.md''',
+    '''docs/adr/.*\.md''',
+    '''\.gitleaks\.toml''',
+    '''package-lock\.json''',
+    '''node_modules/.*''',
+]

@@ -1,0 +1,39 @@
+name: DevSecOps Pipeline
+
+# Workflow d'orchestration des 7 couches de scan.
+# Les couches sont ajoutees au fil des phases du projet.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+
+  layer1-secrets:
+    name: "Layer 1 - Secrets (Gitleaks)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan secrets
+        uses: ./.github/actions/secrets
+        with:
+          config-path: '.gitleaks.toml'
+          fail-on-finding: 'true'
+
+  # TODO ajout au fil des phases :
+  #   layer2-sast        (Semgrep + CodeQL)
+  #   layer3-sca         (Trivy fs + npm audit)
+  #   layer4-iac         (Checkov)
+  #   layer5-container   (Trivy image, sur build)
+  #   layer6-sbom        (Syft CycloneDX, sur release)
+  #   layer7-dast        (OWASP ZAP, nightly)
