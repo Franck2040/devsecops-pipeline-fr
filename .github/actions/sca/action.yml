@@ -19,12 +19,18 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install Trivy
+    - name: Install Trivy (Sovereign Direct Download)
       shell: bash
       run: |
         VERSION="${{ inputs.trivy-version }}"
-        echo "Installing Trivy v${VERSION}..."
-        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /tmp v${VERSION}
+        echo "Installing Trivy v${VERSION} via direct asset download..."
+        
+        # Téléchargement direct du binaire sans interroger l'API GitHub (évite la limitation de débit IP)
+        curl -sLo /tmp/trivy.tar.gz \
+          "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz"
+        
+        # Extraction et installation
+        tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
         sudo install -m 0755 /tmp/trivy /usr/local/bin/trivy
         trivy --version
 
