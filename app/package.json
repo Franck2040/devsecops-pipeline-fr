@@ -1,0 +1,23 @@
+{
+  "name": "incident-tracker",
+  "version": "0.1.0",
+  "description": "Mini-API d'incident tracking, cible de démo pour le pipeline DevSecOps FR. Vulnérabilités volontaires.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"no tests yet\" && exit 0"
+  },
+  "dependencies": {
+    "express": "4.17.1",
+    "sqlite3": "5.1.4",
+    "lodash": "4.17.4",
+    "express-fileupload": "1.1.9",
+    "jsonwebtoken": "8.5.1",
+    "ejs": "2.7.4"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "author": "Calixte Franck Kenmeugne",
+  "license": "MIT"
+}
