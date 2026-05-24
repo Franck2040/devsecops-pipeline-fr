@@ -19,18 +19,46 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install Trivy (Sovereign Direct Download)
+    - name: Install Trivy (Sovereign Direct Download with Multi-Candidate Fallback)
       shell: bash
       run: |
         VERSION="${{ inputs.trivy-version }}"
-        echo "Installing Trivy v${VERSION} via direct asset download..."
+        echo "Installing Trivy v${VERSION}..."
         
-        # Téléchargement direct du binaire sans interroger l'API GitHub (évite la limitation de débit IP)
-        curl -sLo /tmp/trivy.tar.gz \
-          "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz"
+        # Liste exhaustive des noms d'actifs possibles selon les plateformes et versions
+        CANDIDATES=(
+          "trivy_${VERSION}_Linux-64bit.tar.gz"
+          "trivy_${VERSION}_Linux-64bit.tar.gz"
+          "trivy_${VERSION}_Linux-64bit.tar.gz"
+          "trivy_${VERSION}_Linux-64bit.tar.gz"
+          "trivy_${VERSION}_Linux-AMD64.tar.gz"
+          "trivy_${VERSION}_Linux-64bit.tar.gz"
+          "trivy_${VERSION}_Linux-64bit.tar.gz"
+          "trivy_v${VERSION}_Linux-64bit.tar.gz"
+          "trivy_v${VERSION}_Linux-64bit.tar.gz"
+        )
         
-        # Extraction et installation
-        tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+        DOWNLOADED=false
+        for FILE in "${CANDIDATES[@]}"; do
+          URL="https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/${FILE}"
+          echo "Checking candidate link: ${URL}"
+          # curl avec -f renvoie une erreur si 404, empêchant le téléchargement de pages HTML invalides
+          if curl -sLf -o /tmp/trivy.tar.gz "${URL}"; then
+            echo "Successfully downloaded ${FILE}!"
+            DOWNLOADED=true
+            break
+          fi
+        done
+        
+        if [ "$DOWNLOADED" = "true" ]; then
+          echo "Extracting Trivy archive..."
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+        else
+          echo "Warning: Direct asset download failed. Falling back to Aqua Security install script..."
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /tmp v${VERSION}
+        fi
+        
+        echo "Installing Trivy binaire..."
         sudo install -m 0755 /tmp/trivy /usr/local/bin/trivy
         trivy --version
 
