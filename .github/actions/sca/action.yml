@@ -30,7 +30,7 @@ runs:
     # L'action gere l'install, le cache binaire, et evite la rate limit
     # API GitHub. C'est le standard de l'industrie.
     - name: Trivy filesystem scan
-      uses: aquasecurity/trivy-action@0.36.0
+      uses: aquasecurity/trivy-action@v0.36.0  # tag v-prefixe post-incident supply chain mars 2026
       with:
         scan-type: 'fs'
         scan-ref: ${{ inputs.scan-path }}
