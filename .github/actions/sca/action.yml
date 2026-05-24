@@ -25,16 +25,12 @@ runs:
         VERSION="${{ inputs.trivy-version }}"
         echo "Installing Trivy v${VERSION}..."
         
-        # Liste exhaustive des noms d'actifs possibles selon les plateformes et versions
+        # Liste exhaustive et diversifiée des formats de nommage possibles des releases Trivy pour Linux 64-bit (AMD64)
         CANDIDATES=(
           "trivy_${VERSION}_Linux-64bit.tar.gz"
-          "trivy_${VERSION}_Linux-64bit.tar.gz"
-          "trivy_${VERSION}_Linux-64bit.tar.gz"
-          "trivy_${VERSION}_Linux-64bit.tar.gz"
           "trivy_${VERSION}_Linux-AMD64.tar.gz"
-          "trivy_${VERSION}_Linux-64bit.tar.gz"
-          "trivy_${VERSION}_Linux-64bit.tar.gz"
-          "trivy_v${VERSION}_Linux-64bit.tar.gz"
+          "trivy_${VERSION}_linux-64bit.tar.gz"
+          "trivy_${VERSION}_linux-AMD64.tar.gz"
           "trivy_v${VERSION}_Linux-64bit.tar.gz"
         )
         
@@ -42,8 +38,8 @@ runs:
         for FILE in "${CANDIDATES[@]}"; do
           URL="https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/${FILE}"
           echo "Checking candidate link: ${URL}"
-          # curl avec -f renvoie une erreur si 404, empêchant le téléchargement de pages HTML invalides
-          if curl -sLf -o /tmp/trivy.tar.gz "${URL}"; then
+          # curl avec -f et -L (pour suivre les redirections de GitHub)
+          if curl -sL -f -o /tmp/trivy.tar.gz "${URL}"; then
             echo "Successfully downloaded ${FILE}!"
             DOWNLOADED=true
             break
