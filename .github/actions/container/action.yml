@@ -1,0 +1,124 @@
+name: 'DevSecOps - Container (Trivy image)'
+description: 'Build du container et scan de l image construite via Trivy. Detecte les CVE de l OS de base et des packages Node installes.'
+author: 'Calixte Franck Kenmeugne'
+
+inputs:
+  image-tag:
+    description: "Tag local de l'image construite"
+    required: false
+    default: 'incident-tracker:ci-scan'
+  build-context:
+    description: "Contexte de build Docker"
+    required: false
+    default: './app'
+  dockerfile:
+    description: "Chemin du Dockerfile"
+    required: false
+    default: './app/Dockerfile'
+  trivy-severity:
+    description: "Niveaux de severite a reporter"
+    required: false
+    default: 'CRITICAL,HIGH,MEDIUM'
+  fail-on-finding:
+    description: "Faire echouer la CI sur findings (true/false)"
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    # ----------------------------------------------------------------
+    # Etape 1 : build du container localement dans le runner
+    # ----------------------------------------------------------------
+    # Pas de push vers un registry : on garde l'image en cache local.
+    # Plus simple (pas de creds), plus rapide, suffisant pour le scan.
+    - name: Build container image
+      shell: bash
+      run: |
+        echo "Building ${{ inputs.image-tag }} from ${{ inputs.dockerfile }}..."
+        docker build \
+          -t "${{ inputs.image-tag }}" \
+          -f "${{ inputs.dockerfile }}" \
+          "${{ inputs.build-context }}"
+        echo "Image construite. Liste :"
+        docker images "${{ inputs.image-tag }}"
+
+    # ----------------------------------------------------------------
+    # Etape 2 : Trivy image scan
+    # ----------------------------------------------------------------
+    # Reutilise l'action officielle Aqua, pin sur le meme tag que SCA.
+    # skip-setup-trivy=true car le binaire est deja en cache si SCA tourne avant.
+    # Ici on ne le set pas, car les jobs sont independants (chacun son runner).
+    - name: Trivy image scan
+      uses: aquasecurity/trivy-action@v0.36.0
+      with:
+        image-ref: ${{ inputs.image-tag }}
+        scan-type: 'image'
+        format: 'json'
+        output: 'trivy-image-report.json'
+        severity: ${{ inputs.trivy-severity }}
+        exit-code: '0'
+        ignore-unfixed: 'false'
+
+    # ----------------------------------------------------------------
+    # Etape 3 : second run en SARIF pour GitHub Security
+    # ----------------------------------------------------------------
+    - name: Trivy image scan (SARIF)
+      uses: aquasecurity/trivy-action@v0.36.0
+      with:
+        image-ref: ${{ inputs.image-tag }}
+        scan-type: 'image'
+        format: 'sarif'
+        output: 'trivy-image-report.sarif'
+        severity: ${{ inputs.trivy-severity }}
+        exit-code: '0'
+
+    - name: Upload SARIF to GitHub Security
+      if: always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'trivy-image-report.sarif'
+        category: 'trivy-container'
+      continue-on-error: true
+
+    # ----------------------------------------------------------------
+    # Etape 4 : annotation
+    # ----------------------------------------------------------------
+    - name: Annoter findings Trivy image
+      if: always()
+      shell: bash
+      run: |
+        if [ ! -f trivy-image-report.json ]; then
+          echo "::warning::Rapport Trivy image absent."
+          exit 0
+        fi
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "::notice::Rapport image genere (jq absent)."
+          exit 0
+        fi
+        COUNT=$(jq '[.Results[]?.Vulnerabilities // [] | length] | add // 0' trivy-image-report.json)
+        OS_NAME=$(jq -r '.Metadata.OS.Name // "unknown"' trivy-image-report.json)
+        echo "::notice::OS de base detecte : $OS_NAME"
+        if [ "$COUNT" -gt 0 ]; then
+          echo "::warning::Trivy a detecte $COUNT CVE dans le container."
+        else
+          echo "::notice::Aucune CVE detectee dans le container."
+        fi
+        if [ "${{ inputs.fail-on-finding }}" = "true" ] && [ "$COUNT" -gt 0 ]; then
+          echo "::error::fail-on-finding active, echec volontaire."
+          exit 1
+        fi
+
+    # ----------------------------------------------------------------
+    # Etape 5 : upload artifact
+    # ----------------------------------------------------------------
+    - name: Upload container reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: container-reports
+        path: |
+          trivy-image-report.json
+          trivy-image-report.sarif
+        retention-days: 30
+        if-no-files-found: warn

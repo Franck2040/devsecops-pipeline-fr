@@ -1,0 +1,91 @@
+name: 'DevSecOps - IaC (Checkov)'
+description: 'Scan des fichiers IaC (Dockerfile, Terraform, Kubernetes, etc.) via Checkov. Action officielle Bridgecrew/Prisma Cloud.'
+author: 'Calixte Franck Kenmeugne'
+
+inputs:
+  directory:
+    description: "Dossier a scanner (defaut : racine du repo)"
+    required: false
+    default: '.'
+  framework:
+    description: "Frameworks Checkov a activer (comma-separated)"
+    required: false
+    default: 'dockerfile,github_actions,secrets'
+  output-format:
+    description: "Format de sortie : cli, json, sarif, junitxml"
+    required: false
+    default: 'sarif'
+  soft-fail:
+    description: "Ne pas faire echouer la CI sur findings (true/false)"
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    # ----------------------------------------------------------------
+    # Etape 1 : Checkov via l'action officielle Bridgecrew
+    # ----------------------------------------------------------------
+    # Pin sur master? Non, on prefere une version stable pour la
+    # reproductibilite. v12.x est la branche stable courante (Mai 2026).
+    - name: Run Checkov scan
+      id: checkov
+      uses: bridgecrewio/checkov-action@v12.2999.0
+      with:
+        directory: ${{ inputs.directory }}
+        framework: ${{ inputs.framework }}
+        output_format: ${{ inputs.output-format }}
+        output_file_path: 'checkov-report'
+        soft_fail: ${{ inputs.soft-fail }}
+        download_external_modules: false
+        quiet: false
+
+    # ----------------------------------------------------------------
+    # Etape 2 : annotation lisible
+    # ----------------------------------------------------------------
+    - name: Annoter findings Checkov
+      if: always()
+      shell: bash
+      run: |
+        # Checkov ecrit dans checkov-report/results_sarif.sarif quand format=sarif
+        REPORT="checkov-report/results_sarif.sarif"
+        if [ ! -f "$REPORT" ]; then
+          echo "::warning::Rapport Checkov SARIF absent, scan peut-etre vide."
+          exit 0
+        fi
+
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "::notice::Rapport Checkov genere (jq absent, decompte saute)."
+          exit 0
+        fi
+
+        COUNT=$(jq '[.runs[]?.results[]?] | length' "$REPORT" 2>/dev/null || echo 0)
+        if [ "$COUNT" -gt 0 ]; then
+          echo "::warning::Checkov a detecte $COUNT misconfigurations IaC."
+        else
+          echo "::notice::Aucune misconfiguration Checkov detectee."
+        fi
+
+    # ----------------------------------------------------------------
+    # Etape 3 : upload SARIF vers GitHub Security
+    # ----------------------------------------------------------------
+    # Si le format est sarif, on peut feed le tab Security de GitHub
+    - name: Upload SARIF to GitHub Security
+      if: always() && inputs.output-format == 'sarif'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'checkov-report/results_sarif.sarif'
+        category: 'checkov-iac'
+      continue-on-error: true
+
+    # ----------------------------------------------------------------
+    # Etape 4 : upload artifact pour audit
+    # ----------------------------------------------------------------
+    - name: Upload Checkov reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: iac-reports
+        path: checkov-report/
+        retention-days: 30
+        if-no-files-found: warn

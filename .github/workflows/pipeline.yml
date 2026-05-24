@@ -1,7 +1,7 @@
 name: DevSecOps Pipeline
 
 # Workflow d'orchestration des 7 couches de scan.
-# Les couches sont ajoutées au fil des phases du projet.
+# Etat au phase 5 : 5 couches sur 7 actives.
 
 on:
   push:
@@ -12,7 +12,8 @@ on:
 
 permissions:
   contents: read
-  security-events: write # Requis pour téléverser les rapports SARIF vers l'onglet Security
+  security-events: write   # necessaire pour upload SARIF vers GitHub Security
+  actions: read
 
 jobs:
 
@@ -24,7 +25,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Scan secrets
         uses: ./.github/actions/secrets
         with:
@@ -34,31 +34,44 @@ jobs:
   layer2-sast:
     name: "Layer 2 - SAST (Semgrep)"
     runs-on: ubuntu-latest
-    needs: layer1-secrets # On chaîne pour exécuter les couches proprement
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Scan SAST Semgrep
+      - name: Scan SAST
         uses: ./.github/actions/sast
-        with:
-          fail-on-finding: 'false' # Permet de continuer la démo tout en alertant
 
   layer3-sca:
     name: "Layer 3 - SCA (Trivy FS)"
     runs-on: ubuntu-latest
-    needs: layer2-sast
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Scan SCA Dépendances
+      - name: Scan SCA
         uses: ./.github/actions/sca
-        with:
-          fail-on-finding: 'false' # Ne bloque pas pour pouvoir inspecter tous les rapports
 
-  # TODO ajout au fil des phases suivantes :
-  #   layer4-iac         (Checkov)
-  #   layer5-container   (Trivy image, sur build)
+  layer4-iac:
+    name: "Layer 4 - IaC (Checkov)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan IaC
+        uses: ./.github/actions/iac
+        with:
+          directory: '.'
+          framework: 'dockerfile,github_actions,secrets'
+
+  layer5-container:
+    name: "Layer 5 - Container (Trivy image)"
+    runs-on: ubuntu-latest
+    # Build necessite que les fichiers soient checkout, mais pas de dep
+    # sur les layers precedents (parallelisation = pipeline plus rapide).
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan container
+        uses: ./.github/actions/container
+
+  # TODO ajout au fil des phases :
   #   layer6-sbom        (Syft CycloneDX, sur release)
   #   layer7-dast        (OWASP ZAP, nightly)
