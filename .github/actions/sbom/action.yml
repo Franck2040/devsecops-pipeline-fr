@@ -1,0 +1,71 @@
+name: 'DevSecOps - SBOM (Syft via Anchore)'
+description: 'Genere un Software Bill of Materials au format CycloneDX et SPDX via Syft. Attache automatiquement aux releases GitHub.'
+author: 'Calixte Franck Kenmeugne'
+
+inputs:
+  scan-path:
+    description: "Chemin a scanner pour generer le SBOM"
+    required: false
+    default: '.'
+  scan-app:
+    description: "Sous-dossier de l'app a scanner separement"
+    required: false
+    default: 'app'
+
+runs:
+  using: 'composite'
+  steps:
+    # ----------------------------------------------------------------
+    # Etape 1 : SBOM CycloneDX du repo complet
+    # ----------------------------------------------------------------
+    # CycloneDX 1.5 est le format pousse par l'UE et l'ENISA.
+    # Pin sur v0.22.1 pour reproductibilite (pas de @v0 float tag).
+    - name: Generate CycloneDX SBOM (repo)
+      uses: anchore/sbom-action@v0.22.1
+      with:
+        path: ${{ inputs.scan-path }}
+        format: 'cyclonedx-json'
+        artifact-name: 'sbom-repo-cyclonedx.json'
+        upload-artifact: true
+        upload-release-assets: true
+
+    # ----------------------------------------------------------------
+    # Etape 2 : SBOM SPDX du repo complet
+    # ----------------------------------------------------------------
+    # SPDX est l'autre standard majeur (Linux Foundation, ISO/IEC 5962).
+    # Certains regulateurs ou clients exigent un format plutot que l'autre,
+    # on fournit les deux pour maximiser la compatibilite.
+    - name: Generate SPDX SBOM (repo)
+      uses: anchore/sbom-action@v0.22.1
+      with:
+        path: ${{ inputs.scan-path }}
+        format: 'spdx-json'
+        artifact-name: 'sbom-repo-spdx.json'
+        upload-artifact: true
+        upload-release-assets: true
+
+    # ----------------------------------------------------------------
+    # Etape 3 : SBOM CycloneDX du sous-dossier app/ specifiquement
+    # ----------------------------------------------------------------
+    # Vue plus fine sur les dependances applicatives, sans la pollution
+    # des fichiers de config racine.
+    - name: Generate CycloneDX SBOM (app only)
+      uses: anchore/sbom-action@v0.22.1
+      with:
+        path: ${{ inputs.scan-app }}
+        format: 'cyclonedx-json'
+        artifact-name: 'sbom-app-cyclonedx.json'
+        upload-artifact: true
+        upload-release-assets: true
+
+    # ----------------------------------------------------------------
+    # Etape 4 : annotation lisible
+    # ----------------------------------------------------------------
+    - name: Annoter generation SBOM
+      if: always()
+      shell: bash
+      run: |
+        echo "::notice::SBOM generes : CycloneDX (repo + app) et SPDX (repo)"
+        if [ "${{ github.event_name }}" = "release" ]; then
+          echo "::notice::SBOM attaches automatiquement comme assets de la release ${{ github.event.release.tag_name }}"
+        fi

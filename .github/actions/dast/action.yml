@@ -1,0 +1,91 @@
+name: 'DevSecOps - DAST (OWASP ZAP baseline)'
+description: 'Lance l app dans un container et scanne via OWASP ZAP baseline. Detecte les vulnerabilites runtime que les scans statiques manquent.'
+author: 'Calixte Franck Kenmeugne'
+
+inputs:
+  app-port:
+    description: "Port sur lequel l'app ecoute"
+    required: false
+    default: '3000'
+  health-path:
+    description: "Endpoint health-check a poller avant de scanner"
+    required: false
+    default: '/health'
+  fail-on-finding:
+    description: "Faire echouer le job sur findings (true/false)"
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    # ----------------------------------------------------------------
+    # Etape 1 : build de l'image avec un tag dedie
+    # ----------------------------------------------------------------
+    - name: Build app image for DAST
+      shell: bash
+      run: |
+        docker build -t incident-tracker:dast -f app/Dockerfile app/
+
+    # ----------------------------------------------------------------
+    # Etape 2 : lancement du container
+    # ----------------------------------------------------------------
+    - name: Start app container
+      shell: bash
+      run: |
+        docker run -d \
+          --name incident-tracker-dast \
+          -p ${{ inputs.app-port }}:${{ inputs.app-port }} \
+          incident-tracker:dast
+
+    # ----------------------------------------------------------------
+    # Etape 3 : attente que l'app reponde
+    # ----------------------------------------------------------------
+    # Boucle de polling avec timeout. Sans ca, ZAP scannerait un container
+    # pas encore pret et obtiendrait des erreurs reseau au lieu de findings.
+    - name: Wait for app readiness
+      shell: bash
+      run: |
+        echo "Polling http://localhost:${{ inputs.app-port }}${{ inputs.health-path }}..."
+        ATTEMPTS=0
+        MAX_ATTEMPTS=30
+        until curl -fsSL "http://localhost:${{ inputs.app-port }}${{ inputs.health-path }}" >/dev/null 2>&1; do
+          ATTEMPTS=$((ATTEMPTS+1))
+          if [ "$ATTEMPTS" -ge "$MAX_ATTEMPTS" ]; then
+            echo "::error::L'app n'a pas repondu apres $MAX_ATTEMPTS tentatives. Logs du container :"
+            docker logs incident-tracker-dast
+            exit 1
+          fi
+          sleep 2
+        done
+        echo "::notice::App ready apres $ATTEMPTS tentatives."
+
+    # ----------------------------------------------------------------
+    # Etape 4 : OWASP ZAP baseline scan
+    # ----------------------------------------------------------------
+    # zaproxy/action-baseline@v0.15.0, derniere stable.
+    # L'action lance le container ZAP en --network=host par defaut sur Linux,
+    # donc localhost:3000 dans le container ZAP = localhost:3000 du runner.
+    # cmd_options '-a' active les tests passifs et actifs limites.
+    # fail_action false : on annote mais on ne plante pas la CI.
+    - name: ZAP Baseline Scan
+      uses: zaproxy/action-baseline@v0.15.0
+      with:
+        token: ${{ github.token }}
+        target: "http://localhost:${{ inputs.app-port }}"
+        docker_name: 'ghcr.io/zaproxy/zaproxy:stable'
+        cmd_options: '-a -j'
+        fail_action: false
+        allow_issue_writing: true
+        issue_title: '[DAST] ZAP baseline scan findings'
+
+    # ----------------------------------------------------------------
+    # Etape 5 : stop container (always, meme en cas d'echec)
+    # ----------------------------------------------------------------
+    - name: Stop app container
+      if: always()
+      shell: bash
+      run: |
+        docker stop incident-tracker-dast 2>/dev/null || true
+        docker rm incident-tracker-dast 2>/dev/null || true
+        echo "::notice::Container DAST nettoye."

@@ -1,0 +1,29 @@
+name: DAST Nightly (OWASP ZAP)
+
+# Workflow declenche tous les jours a 3h UTC.
+# Lance l'app incident-tracker et la scanne via ZAP baseline.
+#
+# Test manuel immediat : gh workflow run dast-nightly.yml
+
+on:
+  schedule:
+    - cron: '0 3 * * *'    # 3h UTC = 4h Paris
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write          # ZAP cree/met a jour une issue avec les findings
+  actions: read
+
+jobs:
+
+  layer7-dast:
+    name: "Layer 7 - DAST (ZAP baseline)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15  # ZAP prend 5-8 min en general
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan DAST
+        uses: ./.github/actions/dast
