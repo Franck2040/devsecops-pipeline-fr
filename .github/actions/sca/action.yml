@@ -1,109 +1,108 @@
-name: 'DevSecOps - Scan SCA (Trivy FS & npm audit)'
-description: 'Analyse de la sécurité des dépendances logicielles (SCA) via Trivy et npm audit.'
+name: 'DevSecOps - SCA (Trivy FS + npm audit)'
+description: 'Software Composition Analysis : scan des dependances Node via Trivy FS (action officielle Aqua) et npm audit.'
 author: 'Calixte Franck Kenmeugne'
 
 inputs:
-  trivy-version:
-    description: "Version de Trivy à installer"
+  scan-path:
+    description: "Chemin a scanner (relatif a la racine du repo)"
     required: false
-    default: '0.51.1'
-  upload-artifact:
-    description: "Upload des rapports d'audit (true/false)"
+    default: '.'
+  app-dir:
+    description: "Sous-dossier de l'app Node pour npm audit"
     required: false
-    default: 'true'
+    default: 'app'
+  trivy-severity:
+    description: "Niveaux de severite a reporter (Trivy)"
+    required: false
+    default: 'CRITICAL,HIGH,MEDIUM'
   fail-on-finding:
-    description: "Faire échouer le job si des vulnérabilités critiques sont trouvées (true/false)"
+    description: "Faire echouer le job si findings (true/false)"
     required: false
     default: 'false'
 
 runs:
   using: 'composite'
   steps:
-    - name: Install Trivy (Sovereign Direct Download with Multi-Candidate Fallback)
-      shell: bash
-      run: |
-        VERSION="${{ inputs.trivy-version }}"
-        echo "Installing Trivy v${VERSION}..."
-        
-        # Liste exhaustive et diversifiée des formats de nommage possibles des releases Trivy pour Linux 64-bit (AMD64)
-        CANDIDATES=(
-          "trivy_${VERSION}_Linux-64bit.tar.gz"
-          "trivy_${VERSION}_Linux-AMD64.tar.gz"
-          "trivy_${VERSION}_linux-64bit.tar.gz"
-          "trivy_${VERSION}_linux-AMD64.tar.gz"
-          "trivy_v${VERSION}_Linux-64bit.tar.gz"
-        )
-        
-        DOWNLOADED=false
-        for FILE in "${CANDIDATES[@]}"; do
-          URL="https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/${FILE}"
-          echo "Checking candidate link: ${URL}"
-          # curl avec -f et -L (pour suivre les redirections de GitHub)
-          if curl -sL -f -o /tmp/trivy.tar.gz "${URL}"; then
-            echo "Successfully downloaded ${FILE}!"
-            DOWNLOADED=true
-            break
-          fi
-        done
-        
-        if [ "$DOWNLOADED" = "true" ]; then
-          echo "Extracting Trivy archive..."
-          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
-        else
-          echo "Warning: Direct asset download failed. Falling back to Aqua Security install script..."
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /tmp v${VERSION}
-        fi
-        
-        echo "Installing Trivy binaire..."
-        sudo install -m 0755 /tmp/trivy /usr/local/bin/trivy
-        trivy --version
+    # ----------------------------------------------------------------
+    # Etape 1 : Trivy via l'action officielle Aqua
+    # ----------------------------------------------------------------
+    # On pin sur 0.36.0 (derniere stable verifiee).
+    # L'action gere l'install, le cache binaire, et evite la rate limit
+    # API GitHub. C'est le standard de l'industrie.
+    - name: Trivy filesystem scan
+      uses: aquasecurity/trivy-action@0.36.0
+      with:
+        scan-type: 'fs'
+        scan-ref: ${{ inputs.scan-path }}
+        format: 'json'
+        output: 'trivy-sca-report.json'
+        severity: ${{ inputs.trivy-severity }}
+        exit-code: '0'
+        ignore-unfixed: 'false'
 
-    - name: Run Trivy FS SCA
+    # ----------------------------------------------------------------
+    # Etape 2 : annotation lisible dans l'UI GitHub
+    # ----------------------------------------------------------------
+    - name: Annoter les findings Trivy
       shell: bash
       run: |
-        set +e
-        echo "Running Trivy filesystem analysis on packages..."
-        
-        # Scan des dépendances (SCA) avec génération d'un rapport JSON
-        trivy fs \
-          --scanners vuln \
-          --format json \
-          --output trivy-sca-report.json \
-          .
-          
-        # Rendu console lisible pour les logs GitHub
-        trivy fs \
-          --scanners vuln \
-          --severity HIGH,CRITICAL \
-          .
-          
-        EXIT_CODE_TRIVY=$?
-        
-        if [ "$EXIT_CODE_TRIVY" -ne 0 ] && [ "${{ inputs.fail-on-finding }}" = "true" ]; then
-          echo "::error::Trivy a détecté des failles de dépendances bloquantes."
+        if [ ! -f trivy-sca-report.json ]; then
+          echo "::warning::Rapport Trivy absent, l'etape precedente a peut-etre echoue."
+          exit 0
+        fi
+
+        # Si jq n'est pas dispo, l'annotation est best-effort
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "::notice::Rapport Trivy genere (jq absent, decompte saute)."
+          exit 0
+        fi
+
+        COUNT=$(jq '[.Results[]?.Vulnerabilities // [] | length] | add // 0' trivy-sca-report.json)
+        if [ "$COUNT" -gt 0 ]; then
+          echo "::warning::Trivy a detecte $COUNT vulnerabilites dans les dependances."
+        else
+          echo "::notice::Aucune vulnerabilite Trivy detectee."
+        fi
+
+        if [ "${{ inputs.fail-on-finding }}" = "true" ] && [ "$COUNT" -gt 0 ]; then
+          echo "::error::fail-on-finding active, on echoue volontairement."
           exit 1
         fi
-        set -e
 
-    - name: Run Node npm audit
+    # ----------------------------------------------------------------
+    # Etape 3 : npm audit en complement (vue 'npm-native')
+    # ----------------------------------------------------------------
+    - name: npm audit
       shell: bash
+      working-directory: ${{ inputs.app-dir }}
       run: |
         set +e
-        echo "Running npm audit..."
-        cd app
-        npm audit --json > ../npm-audit-report.json
-        
-        # Rendu console standard pour visibilité humaine dans les logs
-        npm audit
-        
-        EXIT_CODE_NPM=$?
-        if [ "$EXIT_CODE_NPM" -ne 0 ]; then
-          echo "::warning::npm audit a identifié des dépendances vulnérables."
-        fi
-        set -e
+        npm audit --json > ../npm-audit-report.json 2>/dev/null
+        EXIT_CODE=$?
 
-    - name: Upload SCA Artifacts
-      if: always() && inputs.upload-artifact == 'true'
+        if [ -f ../npm-audit-report.json ]; then
+          if command -v jq >/dev/null 2>&1; then
+            VULNS=$(jq '.metadata.vulnerabilities.total // 0' ../npm-audit-report.json 2>/dev/null || echo 0)
+            if [ "$VULNS" -gt 0 ]; then
+              echo "::warning::npm audit a detecte $VULNS vulnerabilites."
+            else
+              echo "::notice::npm audit : aucune vulnerabilite."
+            fi
+          else
+            echo "::notice::npm audit termine (jq absent, decompte saute)."
+          fi
+        else
+          echo "::warning::npm audit n'a pas genere de rapport (exit=$EXIT_CODE)."
+        fi
+
+        # On ne plante pas la CI sur npm audit (geste pedagogique : Trivy est l'autorite)
+        exit 0
+
+    # ----------------------------------------------------------------
+    # Etape 4 : upload des artefacts pour audit hors-ligne
+    # ----------------------------------------------------------------
+    - name: Upload SCA reports
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: sca-reports
